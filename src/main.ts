@@ -9,8 +9,16 @@ async function bootstrap(): Promise<void> {
   const root = document.getElementById('app');
   if (!root) throw new Error('Missing #app element');
 
-  // Initialise MSAL and handle any pending redirect
-  await initAuth();
+  // If this page is running inside an MSAL popup/redirect iframe,
+  // let MSAL handle it and do NOT render the app
+  const msalInstance = await initAuth();
+  const isPopup = window.opener && window.opener !== window;
+  const isIframe = window.parent !== window;
+  if (isPopup || isIframe) {
+    console.log('[App] Running inside popup/iframe — letting MSAL handle it');
+    await msalInstance.handleRedirectPromise();
+    return;
+  }
 
   // If already authenticated (token in sessionStorage), go straight to the app
   if (isAuthenticated()) {
