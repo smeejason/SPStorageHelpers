@@ -42,18 +42,24 @@ export async function fetchSiteStorage(): Promise<SiteStorageInfo[]> {
         : null
     }
 
-    // Step 2: Fetch drive quota for each site to get storage usage
+    // Step 2: Fetch all drives per site and sum quota usage.
+    // Uses /drives (plural) instead of /drive to avoid 404 on sites
+    // without a default document library.
     const sites: SiteStorageInfo[] = []
     for (const site of allSites) {
       try {
-        const driveResp = await client
-          .api(`/sites/${site.id}/drive`)
+        const drivesResp = await client
+          .api(`/sites/${site.id}/drives`)
           .select('quota')
           .get()
 
-        const quota = driveResp.quota ?? {}
-        const used = quota.used ?? 0
-        const total = quota.total ?? 0
+        let used = 0
+        let total = 0
+        for (const drv of drivesResp.value ?? []) {
+          const q = drv.quota ?? {}
+          used += q.used ?? 0
+          total += q.total ?? 0
+        }
 
         sites.push({
           id: site.id,
@@ -65,7 +71,7 @@ export async function fetchSiteStorage(): Promise<SiteStorageInfo[]> {
           lastModifiedDateTime: site.createdDateTime,
         })
       } catch {
-        // Site may not have a drive (e.g. hub sites) — include with zero storage
+        // Site may not have any drives — include with zero storage
         sites.push({
           id: site.id,
           displayName: site.displayName,
