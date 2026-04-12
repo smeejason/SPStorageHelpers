@@ -1,7 +1,7 @@
-import { Client } from '@microsoft/microsoft-graph-client';
-import { getToken } from '../auth/authService';
+import { Client } from '@microsoft/microsoft-graph-client'
+import { getToken } from '../auth/authService'
 
-let graphClient: Client | null = null;
+let graphClient: Client | null = null
 
 /** Get (or create) a Graph client that auto-attaches the bearer token */
 export function getGraphClient(): Client {
@@ -9,18 +9,18 @@ export function getGraphClient(): Client {
     graphClient = Client.init({
       authProvider: async (done) => {
         try {
-          const token = await getToken();
-          done(null, token);
+          const token = await getToken()
+          done(null, token)
         } catch (err) {
-          done(err as Error, null);
+          done(err as Error, null)
         }
       },
-    });
+    })
   }
-  return graphClient;
+  return graphClient
 }
 
 /** Reset the client (e.g. after sign-out) */
 export function resetGraphClient(): void {
-  graphClient = null;
+  graphClient = null
 }

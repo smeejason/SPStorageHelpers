@@ -9,11 +9,16 @@
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
-  "keywords": ["sharepoint", "storage", "microsoft-graph", "analytics"],
+  "keywords": [
+    "sharepoint",
+    "storage",
+    "microsoft-graph",
+    "analytics"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@azure/msal-browser": "^5.6.3",
+    "@azure/msal-browser": "^3.30.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",

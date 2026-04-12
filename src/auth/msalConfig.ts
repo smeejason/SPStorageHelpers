@@ -1,14 +1,30 @@
-import { type Configuration, type PopupRequest, LogLevel } from '@azure/msal-browser';
+import type { Configuration, PopupRequest } from '@azure/msal-browser'
 
-// Read from Vite env vars, with optional runtime override from Azure Static Web Apps
-const runtimeConfig = (window as unknown as Record<string, unknown>).__APP_CONFIG__ as
-  | { clientId?: string; tenantId?: string }
-  | undefined;
+// ─── Runtime config ──────────────────────────────────────────────────────────
+// Values are read from window.__APP_CONFIG__ (injected at runtime for
+// deployments) or fall back to Vite env vars for local dev.
+// Set VITE_CLIENT_ID and VITE_TENANT_ID in a .env.local file during development.
 
-const clientId =
-  runtimeConfig?.clientId ?? import.meta.env.VITE_CLIENT_ID ?? '';
-const tenantId =
-  runtimeConfig?.tenantId ?? import.meta.env.VITE_TENANT_ID ?? '';
+function getConfig(): { clientId: string; tenantId: string } {
+  const win = window as Window & { __APP_CONFIG__?: { clientId: string; tenantId: string } }
+  if (win.__APP_CONFIG__) {
+    return win.__APP_CONFIG__
+  }
+  const clientId = import.meta.env.VITE_CLIENT_ID as string | undefined
+  const tenantId = import.meta.env.VITE_TENANT_ID as string | undefined
+  if (!clientId || !tenantId) {
+    console.warn(
+      '[MSAL] VITE_CLIENT_ID / VITE_TENANT_ID not set. ' +
+      'Create a .env.local file with these values for local development.'
+    )
+  }
+  return {
+    clientId: clientId ?? '',
+    tenantId: tenantId ?? 'common',
+  }
+}
+
+const { clientId, tenantId } = getConfig()
 
 export const msalConfig: Configuration = {
   auth: {
@@ -19,20 +35,10 @@ export const msalConfig: Configuration = {
   },
   cache: {
     cacheLocation: 'sessionStorage',
+    storeAuthStateInCookie: false,
   },
-  system: {
-    loggerOptions: {
-      logLevel: LogLevel.Warning,
-      loggerCallback: (_level, message, containsPii) => {
-        if (!containsPii) {
-          console.warn('[MSAL]', message);
-        }
-      },
-    },
-  },
-};
+}
 
-/** Scopes requested at login — must be pre-consented in the Azure App Registration */
 export const loginRequest: PopupRequest = {
   scopes: [
     'User.Read',
@@ -45,4 +51,4 @@ export const loginRequest: PopupRequest = {
     'Directory.ReadWrite.All',
     'Reports.Read.All',
   ],
-};
+}
