@@ -108,12 +108,15 @@ export async function signIn(): Promise<AccountInfo | null> {
   const msal = getMsalInstance();
   try {
     console.log('[Auth] Attempting popup login...');
-    const result = await msal.loginPopup(loginRequest);
+    const result = await msal.loginPopup({
+      ...loginRequest,
+      redirectUri: `${window.location.origin}/redirect.html`,
+    });
     console.log('[Auth] Popup login successful:', result.account.username);
     msal.setActiveAccount(result.account);
     return result.account;
   } catch (err) {
-    // Popup blocked — fall back to redirect
+    // Popup blocked — fall back to full-page redirect
     if (
       err instanceof BrowserAuthError &&
       (err.errorCode === 'popup_window_error' ||
@@ -121,7 +124,7 @@ export async function signIn(): Promise<AccountInfo | null> {
     ) {
       console.warn('[Auth] Popup blocked, falling back to redirect flow');
       await msal.loginRedirect(loginRequest);
-      return null; // Page will redirect, this won't resolve
+      return null;
     }
     console.error('[Auth] Sign-in failed', err);
     return null;
@@ -166,6 +169,7 @@ export async function getToken(
         const result = await msal.acquireTokenPopup({
           scopes: requestScopes,
           account,
+          redirectUri: `${window.location.origin}/redirect.html`,
         });
         return result.accessToken;
       } catch (popupErr) {

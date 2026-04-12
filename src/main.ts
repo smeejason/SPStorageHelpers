@@ -9,17 +9,7 @@ async function bootstrap(): Promise<void> {
   const root = document.getElementById('app');
   if (!root) throw new Error('Missing #app element');
 
-  // If running inside an MSAL popup or iframe, do nothing.
-  // The parent window's MSAL instance reads the popup URL directly
-  // to extract the auth code — we must not interfere.
-  const isPopup = window.opener && window.opener !== window;
-  const isIframe = window.parent !== window;
-  if (isPopup || isIframe) {
-    console.log('[App] Running inside MSAL popup/iframe — standing by');
-    return;
-  }
-
-  // Initialise MSAL (only in the main window)
+  // Initialise MSAL and handle any pending redirect response
   await initAuth();
 
   // If already authenticated (token in sessionStorage), go straight to the app
