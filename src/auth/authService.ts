@@ -14,9 +14,15 @@ export async function initAuth(): Promise<PublicClientApplication> {
   await msalInstance.initialize();
 
   // Handle redirect promise (e.g. after redirect-based login)
-  const response = await msalInstance.handleRedirectPromise();
-  if (response?.account) {
-    msalInstance.setActiveAccount(response.account);
+  // Catch stale/corrupt sessionStorage entries that cause no_token_request_cache_error
+  try {
+    const response = await msalInstance.handleRedirectPromise();
+    if (response?.account) {
+      msalInstance.setActiveAccount(response.account);
+    }
+  } catch (err) {
+    console.warn('[Auth] handleRedirectPromise failed — clearing stale cache', err);
+    sessionStorage.clear();
   }
 
   // If no active account yet, pick the first cached one (session restore)
