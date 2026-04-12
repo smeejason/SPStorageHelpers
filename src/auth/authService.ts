@@ -10,36 +10,73 @@ let msalInstance: PublicClientApplication | null = null;
 
 /** Initialise the MSAL instance (call once at app startup) */
 export async function initAuth(): Promise<PublicClientApplication> {
-  // Clear any stale MSAL entries from sessionStorage before initialising
-  // to prevent no_token_request_cache_error on fresh page loads
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < sessionStorage.length; i++) {
-    const key = sessionStorage.key(i);
-    if (key && key.startsWith('msal.')) {
-      keysToRemove.push(key);
-    }
-  }
-  keysToRemove.forEach((key) => sessionStorage.removeItem(key));
+  console.log('[Auth] Starting MSAL initialization...');
 
-  msalInstance = new PublicClientApplication(msalConfig);
-  await msalInstance.initialize();
+  // Proactively clear any stale MSAL temporary cache entries
+  // that cause no_token_request_cache_error on page reload
+  try {
+    const clientId = msalConfig.auth?.clientId ?? '';
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (
+        key &&
+        (key.startsWith('msal.') ||
+          key.startsWith(`msal.${clientId}.`) ||
+          key.includes('interaction.status') ||
+          key.includes('request.params') ||
+          key.includes('urlHash'))
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    if (keysToRemove.length > 0) {
+      console.log('[Auth] Clearing stale MSAL keys:', keysToRemove);
+      keysToRemove.forEach((key) => sessionStorage.removeItem(key));
+    }
+  } catch (e) {
+    console.warn('[Auth] Could not clear sessionStorage', e);
+  }
+
+  try {
+    msalInstance = new PublicClientApplication(msalConfig);
+    console.log('[Auth] MSAL instance created, calling initialize()...');
+    await msalInstance.initialize();
+    console.log('[Auth] MSAL initialized successfully');
+  } catch (initErr) {
+    console.warn('[Auth] initialize() failed, clearing ALL sessionStorage and retrying', initErr);
+    sessionStorage.clear();
+    msalInstance = new PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
+    console.log('[Auth] MSAL initialized successfully on retry');
+  }
 
   // Handle redirect promise (e.g. after redirect-based login)
   try {
+    console.log('[Auth] Calling handleRedirectPromise()...');
     const response = await msalInstance.handleRedirectPromise();
     if (response?.account) {
+      console.log('[Auth] Redirect login successful:', response.account.username);
       msalInstance.setActiveAccount(response.account);
+    } else {
+      console.log('[Auth] No redirect response (normal fresh load)');
     }
   } catch (err) {
-    console.warn('[Auth] handleRedirectPromise failed', err);
+    console.warn('[Auth] handleRedirectPromise() failed — clearing sessionStorage', err);
+    sessionStorage.clear();
   }
 
   // If no active account yet, pick the first cached one (session restore)
   if (!msalInstance.getActiveAccount()) {
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
+      console.log('[Auth] Restoring cached account:', accounts[0].username);
       msalInstance.setActiveAccount(accounts[0]);
+    } else {
+      console.log('[Auth] No cached accounts — user needs to sign in');
     }
+  } else {
+    console.log('[Auth] Active account:', msalInstance.getActiveAccount()?.username);
   }
 
   return msalInstance;
@@ -70,7 +107,9 @@ export function isAuthenticated(): boolean {
 export async function signIn(): Promise<AccountInfo | null> {
   const msal = getMsalInstance();
   try {
+    console.log('[Auth] Attempting popup login...');
     const result = await msal.loginPopup(loginRequest);
+    console.log('[Auth] Popup login successful:', result.account.username);
     msal.setActiveAccount(result.account);
     return result.account;
   } catch (err) {
@@ -84,7 +123,7 @@ export async function signIn(): Promise<AccountInfo | null> {
       await msal.loginRedirect(loginRequest);
       return null; // Page will redirect, this won't resolve
     }
-    console.error('Sign-in failed', err);
+    console.error('[Auth] Sign-in failed', err);
     return null;
   }
 }
@@ -140,7 +179,6 @@ export async function getToken(
             scopes: requestScopes,
             account,
           });
-          // Page redirects — will never reach here
           return '';
         }
         throw popupErr;
