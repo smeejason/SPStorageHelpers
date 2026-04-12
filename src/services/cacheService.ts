@@ -11,6 +11,25 @@ function listItemsApi(): string {
   return `/sites/${SP_SITE_ID}/lists/${SP_LIST_ID}/items`
 }
 
+// ─── Find cache item ──────────────────────────────────────────────────────────
+
+/** Fetch all list items and find the cache entry by title (avoids $filter index requirement) */
+async function findCacheItem(): Promise<{ id: string; siteData: string | null } | null> {
+  const client = getGraphClient()
+  const response = await client
+    .api(listItemsApi())
+    .expand('fields($select=Title,SiteData)')
+    .top(50)
+    .get()
+
+  for (const item of response.value ?? []) {
+    if (item.fields?.Title === CACHE_TITLE) {
+      return { id: item.id, siteData: item.fields.SiteData ?? null }
+    }
+  }
+  return null
+}
+
 // ─── Read cache ───────────────────────────────────────────────────────────────
 
 /** Load the cached dashboard data from the SP list. Returns null if not found. */
@@ -20,23 +39,11 @@ export async function loadDashboardCache(): Promise<DashboardCache | null> {
     return null
   }
 
-  const client = getGraphClient()
-
   try {
-    const response = await client
-      .api(listItemsApi())
-      .filter(`fields/Title eq '${CACHE_TITLE}'`)
-      .expand('fields')
-      .top(1)
-      .get()
+    const item = await findCacheItem()
+    if (!item?.siteData) return null
 
-    const items = response.value ?? []
-    if (items.length === 0) return null
-
-    const siteDataJson = items[0].fields?.SiteData
-    if (!siteDataJson) return null
-
-    const cache = JSON.parse(siteDataJson) as DashboardCache
+    const cache = JSON.parse(item.siteData) as DashboardCache
     console.log('[Cache] Loaded dashboard cache from', cache.lastRefreshed)
     return cache
   } catch (err) {
@@ -58,22 +65,12 @@ export async function saveDashboardCache(cache: DashboardCache): Promise<void> {
   const siteDataJson = JSON.stringify(cache)
 
   try {
-    // Check if cache item already exists
-    const response = await client
-      .api(listItemsApi())
-      .filter(`fields/Title eq '${CACHE_TITLE}'`)
-      .expand('fields')
-      .select('id')
-      .top(1)
-      .get()
+    const existing = await findCacheItem()
 
-    const items = response.value ?? []
-
-    if (items.length > 0) {
+    if (existing) {
       // Update existing item
-      const itemId = items[0].id
       await client
-        .api(`${listItemsApi()}/${itemId}/fields`)
+        .api(`${listItemsApi()}/${existing.id}/fields`)
         .patch({ SiteData: siteDataJson })
       console.log('[Cache] Updated dashboard cache')
     } else {
