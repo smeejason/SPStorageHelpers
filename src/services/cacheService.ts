@@ -11,20 +11,57 @@ function listItemsApi(): string {
   return `/sites/${SP_SITE_ID}/lists/${SP_LIST_ID}/items`
 }
 
+// ─── Detect column internal name ──────────────────────────────────────────────
+
+let _siteDataColumn: string | null = null
+
+/** Discover the internal name of the SiteData column from the list schema */
+async function getSiteDataColumnName(): Promise<string> {
+  if (_siteDataColumn) return _siteDataColumn
+
+  const client = getGraphClient()
+  try {
+    const response = await client
+      .api(`/sites/${SP_SITE_ID}/lists/${SP_LIST_ID}/columns`)
+      .select('name,displayName')
+      .get()
+
+    console.log('[Cache] List columns:', (response.value ?? []).map(
+      (c: { name: string; displayName: string }) => `${c.displayName} → ${c.name}`
+    ))
+
+    // Find the column by display name (case-insensitive)
+    for (const col of response.value ?? []) {
+      if ((col.displayName as string).toLowerCase() === 'sitedata') {
+        _siteDataColumn = col.name as string
+        console.log('[Cache] SiteData column internal name:', _siteDataColumn)
+        return _siteDataColumn
+      }
+    }
+  } catch (err) {
+    console.warn('[Cache] Could not read list columns', err)
+  }
+
+  // Fallback — try common variants
+  _siteDataColumn = 'SiteData'
+  return _siteDataColumn
+}
+
 // ─── Find cache item ──────────────────────────────────────────────────────────
 
-/** Fetch all list items and find the cache entry by title (avoids $filter index requirement) */
 async function findCacheItem(): Promise<{ id: string; siteData: string | null } | null> {
   const client = getGraphClient()
+  const colName = await getSiteDataColumnName()
+
   const response = await client
     .api(listItemsApi())
-    .expand('fields($select=Title,SiteData)')
+    .expand('fields')
     .top(50)
     .get()
 
   for (const item of response.value ?? []) {
     if (item.fields?.Title === CACHE_TITLE) {
-      return { id: item.id, siteData: item.fields.SiteData ?? null }
+      return { id: item.id, siteData: item.fields[colName] ?? null }
     }
   }
   return null
@@ -32,12 +69,13 @@ async function findCacheItem(): Promise<{ id: string; siteData: string | null } 
 
 // ─── Read cache ───────────────────────────────────────────────────────────────
 
-/** Load the cached dashboard data from the SP list. Returns null if not found. */
 export async function loadDashboardCache(): Promise<DashboardCache | null> {
   if (!SP_SITE_ID || !SP_LIST_ID) {
     console.warn('[Cache] VITE_SP_SITE_ID or VITE_SP_LIST_ID not configured')
     return null
   }
+
+  console.log('[Cache] Using site:', SP_SITE_ID, 'list:', SP_LIST_ID)
 
   try {
     const item = await findCacheItem()
@@ -54,7 +92,6 @@ export async function loadDashboardCache(): Promise<DashboardCache | null> {
 
 // ─── Write cache ──────────────────────────────────────────────────────────────
 
-/** Save dashboard data to the SP list. Creates or updates the cache item. */
 export async function saveDashboardCache(cache: DashboardCache): Promise<void> {
   if (!SP_SITE_ID || !SP_LIST_ID) {
     console.warn('[Cache] VITE_SP_SITE_ID or VITE_SP_LIST_ID not configured — skipping save')
@@ -62,25 +99,24 @@ export async function saveDashboardCache(cache: DashboardCache): Promise<void> {
   }
 
   const client = getGraphClient()
+  const colName = await getSiteDataColumnName()
   const siteDataJson = JSON.stringify(cache)
 
   try {
     const existing = await findCacheItem()
 
     if (existing) {
-      // Update existing item
       await client
         .api(`${listItemsApi()}/${existing.id}/fields`)
-        .patch({ SiteData: siteDataJson })
+        .patch({ [colName]: siteDataJson })
       console.log('[Cache] Updated dashboard cache')
     } else {
-      // Create new item
       await client
         .api(listItemsApi())
         .post({
           fields: {
             Title: CACHE_TITLE,
-            SiteData: siteDataJson,
+            [colName]: siteDataJson,
           },
         })
       console.log('[Cache] Created dashboard cache item')
