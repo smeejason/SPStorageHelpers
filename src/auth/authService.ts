@@ -1,10 +1,10 @@
 import {
   PublicClientApplication,
   InteractionRequiredAuthError,
+  BrowserAuthError,
   type AccountInfo,
-  type AuthenticationResult,
 } from '@azure/msal-browser';
-import { msalConfig, graphScopes } from './msalConfig';
+import { msalConfig, loginRequest } from './msalConfig';
 
 let msalInstance: PublicClientApplication | null = null;
 
@@ -13,10 +13,18 @@ export async function initAuth(): Promise<PublicClientApplication> {
   msalInstance = new PublicClientApplication(msalConfig);
   await msalInstance.initialize();
 
-  // Handle redirect promise (e.g. after login redirect)
+  // Handle redirect promise (e.g. after redirect-based login)
   const response = await msalInstance.handleRedirectPromise();
   if (response?.account) {
     msalInstance.setActiveAccount(response.account);
+  }
+
+  // If no active account yet, pick the first cached one (session restore)
+  if (!msalInstance.getActiveAccount()) {
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      msalInstance.setActiveAccount(accounts[0]);
+    }
   }
 
   return msalInstance;
@@ -35,49 +43,93 @@ export function getActiveAccount(): AccountInfo | null {
   return getMsalInstance().getActiveAccount();
 }
 
-/** Sign in with a popup */
+/** Check whether the user has an active session (token in sessionStorage) */
+export function isAuthenticated(): boolean {
+  return getMsalInstance().getActiveAccount() !== null;
+}
+
+/**
+ * Sign in with a popup.
+ * Falls back to redirect flow if the popup is blocked (COOP policy / browser settings).
+ */
 export async function signIn(): Promise<AccountInfo | null> {
   const msal = getMsalInstance();
   try {
-    const result: AuthenticationResult = await msal.loginPopup({
-      scopes: graphScopes,
-    });
+    const result = await msal.loginPopup(loginRequest);
     msal.setActiveAccount(result.account);
     return result.account;
   } catch (err) {
+    // Popup blocked — fall back to redirect
+    if (
+      err instanceof BrowserAuthError &&
+      (err.errorCode === 'popup_window_error' ||
+        err.errorCode === 'empty_window_error')
+    ) {
+      console.warn('[Auth] Popup blocked, falling back to redirect flow');
+      await msal.loginRedirect(loginRequest);
+      return null; // Page will redirect, this won't resolve
+    }
     console.error('Sign-in failed', err);
     return null;
   }
 }
 
-/** Sign out */
+/** Sign out (popup, with redirect fallback) */
 export async function signOut(): Promise<void> {
   const msal = getMsalInstance();
   const account = msal.getActiveAccount();
-  await msal.logoutPopup({ account });
+  try {
+    await msal.logoutPopup({ account });
+  } catch {
+    await msal.logoutRedirect({ account });
+  }
 }
 
-/** Acquire a token silently, falling back to popup if needed */
-export async function getAccessToken(): Promise<string> {
+/**
+ * Acquire a token silently, falling back to popup (then redirect) if needed.
+ * Pass custom scopes for SharePoint-scoped tokens, otherwise uses the login scopes.
+ */
+export async function getToken(
+  scopes?: string[],
+): Promise<string> {
   const msal = getMsalInstance();
   const account = msal.getActiveAccount();
   if (!account) {
     throw new Error('No active account – user must sign in first');
   }
 
+  const requestScopes = scopes ?? loginRequest.scopes;
+
   try {
     const result = await msal.acquireTokenSilent({
-      scopes: graphScopes,
+      scopes: requestScopes,
       account,
     });
     return result.accessToken;
   } catch (err) {
     if (err instanceof InteractionRequiredAuthError) {
-      const result = await msal.acquireTokenPopup({
-        scopes: graphScopes,
-        account,
-      });
-      return result.accessToken;
+      try {
+        const result = await msal.acquireTokenPopup({
+          scopes: requestScopes,
+          account,
+        });
+        return result.accessToken;
+      } catch (popupErr) {
+        // Popup blocked — redirect
+        if (
+          popupErr instanceof BrowserAuthError &&
+          (popupErr.errorCode === 'popup_window_error' ||
+            popupErr.errorCode === 'empty_window_error')
+        ) {
+          await msal.acquireTokenRedirect({
+            scopes: requestScopes,
+            account,
+          });
+          // Page redirects — will never reach here
+          return '';
+        }
+        throw popupErr;
+      }
     }
     throw err;
   }

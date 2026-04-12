@@ -1,25 +1,24 @@
-import { Configuration, LogLevel } from '@azure/msal-browser';
+import { type Configuration, type PopupRequest, LogLevel } from '@azure/msal-browser';
 
-/**
- * MSAL configuration.
- *
- * Before running, create a `.env.local` file in the project root with:
- *   VITE_AZURE_CLIENT_ID=<your-app-registration-client-id>
- *   VITE_AZURE_AUTHORITY=https://login.microsoftonline.com/<your-tenant-id>
- *   VITE_AZURE_REDIRECT_URI=http://localhost:3000
- */
+// Read from Vite env vars, with optional runtime override from Azure Static Web Apps
+const runtimeConfig = (window as unknown as Record<string, unknown>).__APP_CONFIG__ as
+  | { clientId?: string; tenantId?: string }
+  | undefined;
+
+const clientId =
+  runtimeConfig?.clientId ?? import.meta.env.VITE_CLIENT_ID ?? '';
+const tenantId =
+  runtimeConfig?.tenantId ?? import.meta.env.VITE_TENANT_ID ?? '';
+
 export const msalConfig: Configuration = {
   auth: {
-    clientId: import.meta.env.VITE_AZURE_CLIENT_ID ?? '',
-    authority:
-      import.meta.env.VITE_AZURE_AUTHORITY ??
-      'https://login.microsoftonline.com/common',
-    redirectUri:
-      import.meta.env.VITE_AZURE_REDIRECT_URI ?? window.location.origin,
+    clientId,
+    authority: `https://login.microsoftonline.com/${tenantId}`,
+    redirectUri: window.location.origin,
     postLogoutRedirectUri: window.location.origin,
   },
   cache: {
-    cacheLocation: 'localStorage',
+    cacheLocation: 'sessionStorage',
   },
   system: {
     loggerOptions: {
@@ -33,10 +32,17 @@ export const msalConfig: Configuration = {
   },
 };
 
-/** Graph API scopes required by this application */
-export const graphScopes = [
-  'User.Read',
-  'Sites.Read.All',
-  'Sites.ReadWrite.All',
-  'Reports.Read.All',
-];
+/** Scopes requested at login — must be pre-consented in the Azure App Registration */
+export const loginRequest: PopupRequest = {
+  scopes: [
+    'User.Read',
+    'User.ReadBasic.All',
+    'People.Read',
+    'Sites.ReadWrite.All',
+    'Sites.Manage.All',
+    'Files.ReadWrite.All',
+    'Group.ReadWrite.All',
+    'Directory.ReadWrite.All',
+    'Reports.Read.All',
+  ],
+};

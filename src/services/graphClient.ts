@@ -1,5 +1,5 @@
 import { Client } from '@microsoft/microsoft-graph-client';
-import { getAccessToken } from '../auth/authService';
+import { getToken } from '../auth/authService';
 
 let graphClient: Client | null = null;
 
@@ -9,7 +9,7 @@ export function getGraphClient(): Client {
     graphClient = Client.init({
       authProvider: async (done) => {
         try {
-          const token = await getAccessToken();
+          const token = await getToken();
           done(null, token);
         } catch (err) {
           done(err as Error, null);

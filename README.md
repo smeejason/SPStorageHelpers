@@ -25,12 +25,24 @@ A TypeScript SPA that connects to Microsoft 365 via the Graph API to analyse Sha
 ## Prerequisites
 
 1. **Node.js** >= 18
-2. An **Azure AD App Registration** with the following delegated permissions:
-   - `User.Read`
-   - `Sites.Read.All`
-   - `Sites.ReadWrite.All`
-   - `Reports.Read.All`
-3. Set the redirect URI in the app registration to `http://localhost:3000` (dev) or your deployed URL
+2. An **Azure AD App Registration** (Entra ID) with:
+   - **SPA** platform redirect URI: `http://localhost:3000` (dev) or your deployed URL
+   - The following **delegated** permissions (admin-consented):
+     - `User.Read`, `User.ReadBasic.All`, `People.Read`
+     - `Sites.ReadWrite.All`, `Sites.Manage.All`
+     - `Files.ReadWrite.All`, `Group.ReadWrite.All`
+     - `Directory.ReadWrite.All`, `Reports.Read.All`
+
+## Authentication
+
+The app uses **MSAL.js with PKCE** — no client secrets in code.
+
+| Variable | Purpose |
+|----------|---------|
+| `VITE_CLIENT_ID` | Azure App Registration client/application ID |
+| `VITE_TENANT_ID` | Azure AD tenant ID (your org's directory ID) |
+
+**Flow:** App loads → MSAL initialises → checks `sessionStorage` for an existing token → if authenticated, skips straight to the dashboard; otherwise shows a centered "Sign in with Microsoft" login screen. Login uses a popup, with automatic redirect fallback if the popup is blocked.
 
 ## Getting Started
 
@@ -40,7 +52,7 @@ npm install
 
 # Copy and configure environment variables
 cp .env.example .env.local
-# Edit .env.local with your Azure AD client ID, tenant, and redirect URI
+# Edit .env.local with your VITE_CLIENT_ID and VITE_TENANT_ID
 
 # Start dev server
 npm run dev
@@ -61,7 +73,7 @@ src/
   store/          # Redux-like global state management
   types/          # TypeScript interfaces & type definitions
   ui/
-    components/   # Reusable UI components (navbar, loader, storage bar)
+    components/   # Reusable UI components (navbar, loader, storage bar, auth panel)
     pages/        # Page-level views (dashboard, site analysis, cleanup, export)
   utils/          # Formatting helpers
   styles/         # CSS styles

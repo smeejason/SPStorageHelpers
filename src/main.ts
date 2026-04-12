@@ -1,14 +1,29 @@
-import { initAuth, getActiveAccount } from './auth/authService';
+import { initAuth, isAuthenticated, getActiveAccount } from './auth/authService';
 import { store } from './store/store';
+import { renderAuthPanel } from './ui/components/authPanel';
 import { mountApp } from './ui/app';
 import { initRouter } from './ui/router';
 import './styles/main.css';
 
 async function bootstrap(): Promise<void> {
-  // Initialise MSAL
+  const root = document.getElementById('app');
+  if (!root) throw new Error('Missing #app element');
+
+  // Initialise MSAL and handle any pending redirect
   await initAuth();
 
-  // Check for existing session
+  // If already authenticated (token in sessionStorage), go straight to the app
+  if (isAuthenticated()) {
+    setAuthState();
+    launchApp(root);
+    return;
+  }
+
+  // Otherwise show the login screen
+  renderAuthPanel(root, () => launchApp(root));
+}
+
+function setAuthState(): void {
   const account = getActiveAccount();
   if (account) {
     store.dispatch({
@@ -21,13 +36,11 @@ async function bootstrap(): Promise<void> {
       },
     });
   }
+}
 
-  // Mount the application
-  const root = document.getElementById('app');
-  if (!root) throw new Error('Missing #app element');
+function launchApp(root: HTMLElement): void {
+  setAuthState();
   mountApp(root);
-
-  // Activate hash-based router
   initRouter();
 }
 

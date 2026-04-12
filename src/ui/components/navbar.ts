@@ -1,7 +1,8 @@
 import type { RouteName } from '../../types';
 import { navigate } from '../router';
 import { store } from '../../store/store';
-import { signIn, signOut } from '../../auth/authService';
+import { signOut } from '../../auth/authService';
+import { resetGraphClient } from '../../services/graphClient';
 
 const navItems: { label: string; route: RouteName }[] = [
   { label: 'Dashboard', route: 'dashboard' },
@@ -34,41 +35,30 @@ export function renderNavbar(container: HTMLElement): void {
   });
   nav.appendChild(links);
 
-  const authBtn = document.createElement('button');
-  authBtn.className = 'btn btn-auth';
-  nav.appendChild(authBtn);
+  // User info + sign out
+  const authArea = document.createElement('div');
+  authArea.className = 'navbar-auth';
 
-  function updateAuth(): void {
+  const userLabel = document.createElement('span');
+  userLabel.className = 'navbar-user';
+  authArea.appendChild(userLabel);
+
+  const signOutBtn = document.createElement('button');
+  signOutBtn.className = 'btn btn-auth';
+  signOutBtn.textContent = 'Sign Out';
+  signOutBtn.addEventListener('click', async () => {
+    await signOut();
+    resetGraphClient();
+    store.dispatch({ type: 'RESET' });
+    // Reload to show login screen
+    window.location.reload();
+  });
+  authArea.appendChild(signOutBtn);
+  nav.appendChild(authArea);
+
+  function updateNav(): void {
     const { auth, route } = store.getState();
-    authBtn.textContent = auth.isAuthenticated ? 'Sign Out' : 'Sign In';
-    authBtn.onclick = auth.isAuthenticated
-      ? async () => {
-          await signOut();
-          store.dispatch({
-            type: 'SET_AUTH',
-            payload: {
-              isAuthenticated: false,
-              userName: null,
-              userEmail: null,
-              tenantId: null,
-            },
-          });
-          store.dispatch({ type: 'RESET' });
-        }
-      : async () => {
-          const account = await signIn();
-          if (account) {
-            store.dispatch({
-              type: 'SET_AUTH',
-              payload: {
-                isAuthenticated: true,
-                userName: account.name ?? null,
-                userEmail: account.username ?? null,
-                tenantId: account.tenantId ?? null,
-              },
-            });
-          }
-        };
+    userLabel.textContent = auth.userName ?? '';
 
     // Highlight active route
     links.querySelectorAll('.nav-link').forEach((el, i) => {
@@ -76,8 +66,8 @@ export function renderNavbar(container: HTMLElement): void {
     });
   }
 
-  store.subscribe(updateAuth);
-  updateAuth();
+  store.subscribe(updateNav);
+  updateNav();
 
   container.appendChild(nav);
 }
