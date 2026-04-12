@@ -7,7 +7,13 @@ export function renderAuthPanel(
   container.innerHTML = `
     <div class="auth-panel-wrapper">
       <div class="auth-panel-card">
-        <div class="auth-panel-logo">SP</div>
+        <div class="auth-panel-logo">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <rect width="48" height="48" rx="8" fill="#0078d4"/>
+            <path d="M12 24L24 12L36 24L24 36L12 24Z" fill="white" opacity="0.9"/>
+            <path d="M24 12L36 24L24 36" fill="white" opacity="0.4"/>
+          </svg>
+        </div>
         <h1 class="auth-panel-title">SP Storage Helpers</h1>
         <p class="auth-panel-subtitle">Sign in with your Microsoft 365 account to analyse and manage SharePoint tenant storage.</p>
         <button id="btn-signin" class="btn btn-microsoft btn-large">
@@ -19,7 +25,7 @@ export function renderAuthPanel(
           </svg>
           Sign in with Microsoft
         </button>
-        <div id="auth-status" class="auth-panel-status" style="display:none"></div>
+        <div id="auth-status" class="auth-panel-status"></div>
       </div>
     </div>
   `
@@ -29,16 +35,14 @@ export function renderAuthPanel(
     const status = container.querySelector('#auth-status') as HTMLElement
     btn.disabled = true
     btn.textContent = 'Redirecting to Microsoft…'
-    status.style.display = 'none'
+    status.className = 'auth-panel-status'
 
     try {
-      // This redirects the page — it won't return
       await signIn()
     } catch (err) {
       console.error('[Auth] Sign-in failed', err)
       status.className = 'auth-panel-status error'
       status.textContent = `Sign-in failed: ${(err as Error).message}`
-      status.style.display = 'block'
       btn.disabled = false
       btn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">

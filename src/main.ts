@@ -2,7 +2,6 @@ import { initAuth, isAuthenticated, getActiveAccount } from './auth/authService'
 import { store } from './store/store'
 import { mountApp } from './ui/app'
 import { initRouter } from './ui/router'
-import './styles/main.css'
 
 async function bootstrap(): Promise<void> {
   const root = document.getElementById('app')
