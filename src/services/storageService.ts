@@ -133,9 +133,9 @@ export async function fetchLargeFiles(
 
     for (const drive of drivesResp.value ?? []) {
       try {
+        // search() doesn't support $select or $orderby — fetch all fields, sort client-side
         const itemsResp = await client
           .api(`/drives/${drive.id}/root/search(q='*')`)
-          .select('id,name,size,webUrl,lastModifiedDateTime,lastModifiedBy')
           .top(200)
           .get()
 
