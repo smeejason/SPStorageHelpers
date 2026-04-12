@@ -76,6 +76,35 @@ export interface CleanupRecommendation {
   risk: 'low' | 'medium' | 'high';
 }
 
+/** Cached dashboard data stored in the SP list */
+export interface DashboardCache {
+  summary: TenantStorageSummary;
+  sites: SiteStorageInfo[];
+  lastRefreshed: string;
+}
+
+/** Detailed analysis data for a single site, stored as JSON in Documents/SPStorage/ */
+export interface SiteAnalysisData {
+  siteId: string;
+  siteName: string;
+  siteUrl: string;
+  storageUsedInBytes: number;
+  storageAllocatedInBytes: number;
+  largeFiles: LargeFileInfo[];
+  recycleBinItems: RecycleBinItem[];
+  driveBreakdown: DriveStorageInfo[];
+  lastAnalysed: string;
+}
+
+/** Storage breakdown per drive/library */
+export interface DriveStorageInfo {
+  driveId: string;
+  driveName: string;
+  usedBytes: number;
+  totalBytes: number;
+  itemCount: number;
+}
+
 /** Application route names */
 export type RouteName = 'dashboard' | 'sites' | 'cleanup' | 'export';
 

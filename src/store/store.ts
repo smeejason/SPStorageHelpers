@@ -16,6 +16,7 @@ export interface AppState {
   error: string | null;
   tenantSummary: TenantStorageSummary | null;
   sites: SiteStorageInfo[];
+  selectedSiteId: string | null;
   largeFiles: LargeFileInfo[];
   recycleBinItems: RecycleBinItem[];
   recommendations: CleanupRecommendation[];
@@ -29,6 +30,7 @@ export type ActionType =
   | 'SET_ERROR'
   | 'SET_TENANT_SUMMARY'
   | 'SET_SITES'
+  | 'SET_SELECTED_SITE'
   | 'SET_LARGE_FILES'
   | 'SET_RECYCLE_BIN'
   | 'SET_RECOMMENDATIONS'
@@ -53,6 +55,7 @@ const initialState: AppState = {
   error: null,
   tenantSummary: null,
   sites: [],
+  selectedSiteId: null,
   largeFiles: [],
   recycleBinItems: [],
   recommendations: [],
@@ -75,6 +78,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case 'SET_SITES':
       return { ...state, sites: action.payload as SiteStorageInfo[] };
+    case 'SET_SELECTED_SITE':
+      return { ...state, selectedSiteId: action.payload as string | null };
     case 'SET_LARGE_FILES':
       return { ...state, largeFiles: action.payload as LargeFileInfo[] };
     case 'SET_RECYCLE_BIN':
