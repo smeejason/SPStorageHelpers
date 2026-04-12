@@ -133,29 +133,37 @@ export async function fetchLargeFiles(
 
     for (const drive of drivesResp.value ?? []) {
       try {
-        // search() doesn't support $select or $orderby — fetch all fields, sort client-side
-        const itemsResp = await client
-          .api(`/drives/${drive.id}/root/search(q='*')`)
-          .top(200)
-          .get()
+        // Use delta to enumerate all items in the drive (search endpoint is unreliable)
+        let deltaLink: string | null = `/drives/${drive.id}/root/delta`
+        while (deltaLink) {
+          const resp = await client
+            .api(deltaLink)
+            .top(200)
+            .get()
 
-        for (const item of itemsResp.value ?? []) {
-          if (item.size >= minSizeBytes) {
-            largeFiles.push({
-              id: item.id,
-              name: item.name,
-              size: item.size,
-              webUrl: item.webUrl ?? '',
-              siteName: '',
-              siteId,
-              libraryName: drive.name,
-              lastModifiedDateTime: item.lastModifiedDateTime ?? '',
-              lastModifiedBy: item.lastModifiedBy?.user?.displayName ?? 'Unknown',
-            })
+          for (const item of resp.value ?? []) {
+            if (item.file && item.size >= minSizeBytes) {
+              largeFiles.push({
+                id: item.id,
+                name: item.name,
+                size: item.size,
+                webUrl: item.webUrl ?? '',
+                siteName: '',
+                siteId,
+                libraryName: drive.name,
+                lastModifiedDateTime: item.lastModifiedDateTime ?? '',
+                lastModifiedBy: item.lastModifiedBy?.user?.displayName ?? 'Unknown',
+              })
+            }
           }
+
+          // Follow pagination (not the delta token — we only need one pass)
+          deltaLink = resp['@odata.nextLink']
+            ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
+            : null
         }
       } catch {
-        // Skip drives that can't be searched
+        // Skip drives that can't be enumerated
       }
     }
 
