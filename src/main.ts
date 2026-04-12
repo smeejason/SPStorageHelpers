@@ -5,6 +5,15 @@ import { initRouter } from './ui/router'
 import './styles/main.css'
 
 async function bootstrap(): Promise<void> {
+  // If running inside an MSAL login popup, do nothing.
+  // The parent window reads the auth code from this popup's URL.
+  // We must not call initAuth/handleRedirectPromise or it will
+  // consume the code before the parent can read it.
+  if (window.opener && window.opener !== window) {
+    console.log('[App] Running inside MSAL popup — skipping app load')
+    return
+  }
+
   const root = document.getElementById('app')
   if (!root) throw new Error('Missing #app element')
 
