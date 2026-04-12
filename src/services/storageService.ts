@@ -137,7 +137,6 @@ export async function fetchLargeFiles(
           .api(`/drives/${drive.id}/root/search(q='*')`)
           .select('id,name,size,webUrl,lastModifiedDateTime,lastModifiedBy')
           .top(200)
-          .orderby('size desc')
           .get()
 
         for (const item of itemsResp.value ?? []) {
@@ -178,8 +177,10 @@ export async function fetchRecycleBinItems(siteId: string): Promise<RecycleBinIt
   const client = getGraphClient()
 
   try {
+    // recycleBin endpoint requires beta API
     const response = await client
       .api(`/sites/${siteId}/recycleBin/items`)
+      .version('beta')
       .top(200)
       .get()
 
