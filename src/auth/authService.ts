@@ -10,19 +10,28 @@ let msalInstance: PublicClientApplication | null = null;
 
 /** Initialise the MSAL instance (call once at app startup) */
 export async function initAuth(): Promise<PublicClientApplication> {
+  // Clear any stale MSAL entries from sessionStorage before initialising
+  // to prevent no_token_request_cache_error on fresh page loads
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < sessionStorage.length; i++) {
+    const key = sessionStorage.key(i);
+    if (key && key.startsWith('msal.')) {
+      keysToRemove.push(key);
+    }
+  }
+  keysToRemove.forEach((key) => sessionStorage.removeItem(key));
+
   msalInstance = new PublicClientApplication(msalConfig);
   await msalInstance.initialize();
 
   // Handle redirect promise (e.g. after redirect-based login)
-  // Catch stale/corrupt sessionStorage entries that cause no_token_request_cache_error
   try {
     const response = await msalInstance.handleRedirectPromise();
     if (response?.account) {
       msalInstance.setActiveAccount(response.account);
     }
   } catch (err) {
-    console.warn('[Auth] handleRedirectPromise failed — clearing stale cache', err);
-    sessionStorage.clear();
+    console.warn('[Auth] handleRedirectPromise failed', err);
   }
 
   // If no active account yet, pick the first cached one (session restore)
