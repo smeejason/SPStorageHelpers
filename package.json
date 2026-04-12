@@ -1,0 +1,28 @@
+{
+  "name": "sp-storage-helpers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A set of help applications to analyse SharePoint Storage Issues and then Resolve them.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["sharepoint", "storage", "microsoft-graph", "analytics"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@azure/msal-browser": "^5.6.3",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.1",
+    "papaparse": "^5.5.3"
+  },
+  "devDependencies": {
+    "@types/jszip": "^3.4.0",
+    "@types/papaparse": "^5.5.2",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8"
+  }
+}
