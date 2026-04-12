@@ -14,16 +14,19 @@ let _initialized = false
 export async function initAuth(): Promise<void> {
   if (_initialized) return
   await msalInstance.initialize()
-  // Handle redirect response (if using redirect flow instead of popup)
-  await msalInstance.handleRedirectPromise()
+  // Handle redirect response — this picks up the auth code after
+  // Microsoft redirects back to our app
+  const response = await msalInstance.handleRedirectPromise()
+  if (response?.account) {
+    msalInstance.setActiveAccount(response.account)
+  }
   _initialized = true
 }
 
 // ─── Account helpers ──────────────────────────────────────────────────────────
 
 function getAccount(): AccountInfo | null {
-  const accounts = msalInstance.getAllAccounts()
-  return accounts.length > 0 ? accounts[0] : null
+  return msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0] ?? null
 }
 
 export function isAuthenticated(): boolean {
@@ -36,29 +39,15 @@ export function getActiveAccount(): AccountInfo | null {
 
 // ─── Sign in / out ────────────────────────────────────────────────────────────
 
-export async function signIn(): Promise<AccountInfo> {
-  try {
-    const result = await msalInstance.loginPopup(loginRequest)
-    return result.account
-  } catch (err) {
-    // COOP browser policy can block popup detection even when login succeeded.
-    // If the account was cached by MSAL, treat it as a successful sign-in.
-    const account = getAccount()
-    if (account) {
-      return account
-    }
-    // Fall back to redirect if popup was blocked entirely
-    if ((err as Error).message?.includes('popup')) {
-      await msalInstance.loginRedirect(loginRequest)
-      return Promise.reject(new Error('Redirecting for login…'))
-    }
-    throw err
-  }
+/** Sign in using redirect flow (full page navigation, no popups) */
+export async function signIn(): Promise<void> {
+  await msalInstance.loginRedirect(loginRequest)
+  // Page navigates away — this never resolves
 }
 
 export async function signOut(): Promise<void> {
   const account = getAccount()
-  await msalInstance.logoutPopup({ account: account ?? undefined })
+  await msalInstance.logoutRedirect({ account: account ?? undefined })
 }
 
 // ─── Token acquisition ────────────────────────────────────────────────────────
@@ -72,8 +61,9 @@ export async function getToken(scopes: string[] = loginRequest.scopes ?? []): Pr
     return result.accessToken
   } catch (err) {
     if (err instanceof InteractionRequiredAuthError) {
-      const result = await msalInstance.acquireTokenPopup({ scopes, account })
-      return result.accessToken
+      // Token expired and needs interaction — redirect to re-auth
+      await msalInstance.acquireTokenRedirect({ scopes, account })
+      return '' // Page navigates away
     }
     throw err
   }

@@ -1,17 +1,9 @@
-import { signIn, isAuthenticated } from '../../auth/authService'
-import { getGraphClient } from '../../services/graphClient'
-import { store } from '../../store/store'
+import { signIn } from '../../auth/authService'
 
 export function renderAuthPanel(
   container: HTMLElement,
-  onAuthenticated: () => void,
+  _onAuthenticated: () => void,
 ): void {
-  // If already authenticated, skip login
-  if (isAuthenticated()) {
-    onAuthenticated()
-    return
-  }
-
   container.innerHTML = `
     <div class="auth-panel-wrapper">
       <div class="auth-panel-card">
@@ -36,35 +28,12 @@ export function renderAuthPanel(
     const btn = container.querySelector('#btn-signin') as HTMLButtonElement
     const status = container.querySelector('#auth-status') as HTMLElement
     btn.disabled = true
-    btn.textContent = 'Signing in…'
+    btn.textContent = 'Redirecting to Microsoft…'
     status.style.display = 'none'
 
     try {
-      const account = await signIn()
-
-      store.dispatch({
-        type: 'SET_AUTH',
-        payload: {
-          isAuthenticated: true,
-          userName: account.name ?? null,
-          userEmail: account.username ?? null,
-          tenantId: account.tenantId ?? null,
-        },
-      })
-
-      // Verify Graph connectivity
-      status.className = 'auth-panel-status'
-      status.textContent = 'Verifying Graph API connection…'
-      status.style.display = 'block'
-
-      try {
-        const client = getGraphClient()
-        await client.api('/sites/root').select('id,displayName').get()
-      } catch {
-        console.warn('[Auth] Could not reach root site — continuing anyway')
-      }
-
-      onAuthenticated()
+      // This redirects the page — it won't return
+      await signIn()
     } catch (err) {
       console.error('[Auth] Sign-in failed', err)
       status.className = 'auth-panel-status error'
