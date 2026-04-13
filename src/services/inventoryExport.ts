@@ -1,106 +1,187 @@
 import ExcelJS from 'exceljs'
-import type { SiteFileInventory } from '../types'
+import type { LibraryInventory, SiteFileInventory } from '../types'
 import { formatBytes } from '../utils/format'
+import { getGraphClient } from './graphClient'
 
-/** Export the full file inventory (with versions) to an Excel workbook and trigger download */
-export async function exportInventoryToExcel(inventory: SiteFileInventory): Promise<void> {
+const SP_SITE_ID = import.meta.env.VITE_SP_SITE_ID ?? ''
+const FOLDER_PATH = 'SPStorage'
+
+// ─── Ensure folder ────────────────────────────────────────────────────────────
+
+let folderChecked = false
+
+async function ensureFolder(): Promise<void> {
+  if (folderChecked) return
+  const client = getGraphClient()
+  try {
+    await client.api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}`).get()
+    folderChecked = true
+  } catch {
+    await client.api(`/sites/${SP_SITE_ID}/drive/root/children`).post({
+      name: FOLDER_PATH, folder: {}, '@microsoft.graph.conflictBehavior': 'fail',
+    })
+    folderChecked = true
+  }
+}
+
+// ─── File name helpers ────────────────────────────────────────────────────────
+
+function safeName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').slice(0, 60)
+}
+
+export function libraryExcelFileName(siteName: string, libName: string): string {
+  return `${safeName(siteName)}_${safeName(libName)}.xlsx`
+}
+
+// ─── Build workbook for a single library ──────────────────────────────────────
+
+export function buildLibraryWorkbook(lib: LibraryInventory): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook()
   wb.creator = 'SP Storage Helpers'
 
-  // ─── Sheet 1: All Files ─────────────────────────────────────────
-
+  // Sheet 1: Files
   const filesSheet = wb.addWorksheet('Files')
-  const fileHeaders = [
-    'Library', 'Name', 'Title', 'Path', 'Size (bytes)', 'Size',
+  const fh = filesSheet.addRow([
+    'Name', 'Title', 'Path', 'Size (bytes)', 'Size',
     'Created', 'Created By', 'Modified', 'Modified By',
     'Current Version', 'Version Count', 'Total Version Size', 'Total Version Size (formatted)',
-  ]
-  const headerRow = filesSheet.addRow(fileHeaders)
-  headerRow.font = { bold: true }
-  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0078D4' } }
-  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  ])
+  styleHeader(fh)
 
-  for (const lib of inventory.libraries) {
-    for (const file of lib.files) {
-      const totalVersionSize = file.versions.reduce((s, v) => s + v.size, 0)
-      filesSheet.addRow([
-        lib.driveName,
-        file.name,
-        file.title,
-        file.path,
-        file.size,
-        formatBytes(file.size),
-        file.createdDateTime,
-        file.createdBy,
-        file.lastModifiedDateTime,
-        file.lastModifiedBy,
-        file.versionLabel,
-        file.versions.length,
-        totalVersionSize,
-        formatBytes(totalVersionSize),
+  for (const file of lib.files) {
+    const tvs = file.versions.reduce((s, v) => s + v.size, 0)
+    filesSheet.addRow([
+      file.name, file.title, file.path, file.size, formatBytes(file.size),
+      file.createdDateTime, file.createdBy,
+      file.lastModifiedDateTime, file.lastModifiedBy,
+      file.versionLabel, file.versions.length, tvs, formatBytes(tvs),
+    ])
+  }
+  autoWidth(filesSheet)
+
+  // Sheet 2: Versions
+  const versionsSheet = wb.addWorksheet('Versions')
+  const vh = versionsSheet.addRow([
+    'File Name', 'File Path', 'Version', 'Size (bytes)', 'Size', 'Modified', 'Modified By',
+  ])
+  styleHeader(vh)
+
+  for (const file of lib.files) {
+    for (const ver of file.versions) {
+      versionsSheet.addRow([
+        file.name, file.path, ver.versionLabel, ver.size, formatBytes(ver.size),
+        ver.lastModifiedDateTime, ver.lastModifiedBy,
       ])
     }
   }
-
-  autoWidth(filesSheet)
-
-  // ─── Sheet 2: All Versions ──────────────────────────────────────
-
-  const versionsSheet = wb.addWorksheet('Versions')
-  const versionHeaders = [
-    'Library', 'File Name', 'File Path', 'Version', 'Size (bytes)', 'Size',
-    'Modified', 'Modified By',
-  ]
-  const vHeaderRow = versionsSheet.addRow(versionHeaders)
-  vHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-  vHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0078D4' } }
-
-  for (const lib of inventory.libraries) {
-    for (const file of lib.files) {
-      for (const ver of file.versions) {
-        versionsSheet.addRow([
-          lib.driveName,
-          file.name,
-          file.path,
-          ver.versionLabel,
-          ver.size,
-          formatBytes(ver.size),
-          ver.lastModifiedDateTime,
-          ver.lastModifiedBy,
-        ])
-      }
-    }
-  }
-
   autoWidth(versionsSheet)
 
-  // ─── Sheet 3: Library Summary ───────────────────────────────────
+  return wb
+}
 
-  const summarySheet = wb.addWorksheet('Library Summary')
-  const sHeaders = ['Library', 'Files', 'Total Versions', 'Used', 'Quota', 'Version Storage']
-  const sHeaderRow = summarySheet.addRow(sHeaders)
-  sHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-  sHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0078D4' } }
+// ─── Save library Excel to SharePoint ─────────────────────────────────────────
 
-  for (const lib of inventory.libraries) {
-    const totalVersions = lib.files.reduce((s, f) => s + f.versions.length, 0)
-    const totalVersionSize = lib.files.reduce(
-      (s, f) => s + f.versions.reduce((vs, v) => vs + v.size, 0), 0,
-    )
-    summarySheet.addRow([
-      lib.driveName,
-      lib.files.length,
-      totalVersions,
-      formatBytes(lib.usedBytes),
-      formatBytes(lib.totalBytes),
-      formatBytes(totalVersionSize),
-    ])
+export async function saveLibraryExcelToSP(
+  siteName: string,
+  lib: LibraryInventory,
+): Promise<void> {
+  if (!SP_SITE_ID) return
+  const client = getGraphClient()
+  await ensureFolder()
+
+  const wb = buildLibraryWorkbook(lib)
+  const buffer = await wb.xlsx.writeBuffer()
+  const fileName = libraryExcelFileName(siteName, lib.driveName)
+
+  await client
+    .api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}/${fileName}:/content`)
+    .put(buffer)
+
+  console.log(`[ExcelCache] Saved ${fileName}`)
+}
+
+// ─── Load library Excel from SharePoint ───────────────────────────────────────
+
+export async function loadLibraryExcelFromSP(
+  siteName: string,
+  libName: string,
+): Promise<LibraryInventory | null> {
+  if (!SP_SITE_ID) return null
+  const client = getGraphClient()
+  const fileName = libraryExcelFileName(siteName, libName)
+
+  try {
+    const resp = await client
+      .api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}/${fileName}:/content`)
+      .responseType('arraybuffer' as never)
+      .get()
+
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(resp as ArrayBuffer)
+
+    const filesSheet = wb.getWorksheet('Files')
+    if (!filesSheet) return null
+
+    const files: LibraryInventory['files'] = []
+    filesSheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+      if (rowNum === 1) return // header
+      const vals = row.values as unknown[]
+      // ExcelJS row.values is 1-indexed
+      files.push({
+        id: '',
+        driveId: '',
+        libraryName: libName,
+        name: String(vals[1] ?? ''),
+        title: String(vals[2] ?? ''),
+        path: String(vals[3] ?? ''),
+        size: Number(vals[4] ?? 0),
+        webUrl: '',
+        createdDateTime: String(vals[6] ?? ''),
+        createdBy: String(vals[7] ?? ''),
+        lastModifiedDateTime: String(vals[8] ?? ''),
+        lastModifiedBy: String(vals[9] ?? ''),
+        versionLabel: String(vals[10] ?? ''),
+        versions: [],
+      })
+    })
+
+    // Load versions sheet
+    const versionsSheet = wb.getWorksheet('Versions')
+    if (versionsSheet) {
+      const versionsByFile = new Map<string, LibraryInventory['files'][0]['versions']>()
+      versionsSheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
+        if (rowNum === 1) return
+        const vals = row.values as unknown[]
+        const fileName = String(vals[1] ?? '')
+        if (!versionsByFile.has(fileName)) versionsByFile.set(fileName, [])
+        versionsByFile.get(fileName)!.push({
+          versionId: String(vals[3] ?? ''),
+          versionLabel: String(vals[3] ?? ''),
+          size: Number(vals[4] ?? 0),
+          lastModifiedDateTime: String(vals[6] ?? ''),
+          lastModifiedBy: String(vals[7] ?? ''),
+        })
+      })
+      for (const file of files) {
+        file.versions = versionsByFile.get(file.name) ?? []
+      }
+    }
+
+    console.log(`[ExcelCache] Loaded ${fileName}: ${files.length} files`)
+    return { driveId: '', driveName: libName, usedBytes: 0, totalBytes: 0, files }
+  } catch {
+    return null
   }
+}
 
-  autoWidth(summarySheet)
+// ─── Download library Excel to browser ────────────────────────────────────────
 
-  // ─── Download ───────────────────────────────────────────────────
-
+export async function downloadLibraryExcel(
+  siteName: string,
+  lib: LibraryInventory,
+): Promise<void> {
+  const wb = buildLibraryWorkbook(lib)
   const buffer = await wb.xlsx.writeBuffer()
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -108,11 +189,26 @@ export async function exportInventoryToExcel(inventory: SiteFileInventory): Prom
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${inventory.siteName.replace(/[^a-zA-Z0-9]/g, '_')}_file_inventory.xlsx`
+  a.download = libraryExcelFileName(siteName, lib.driveName)
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+// ─── Export all libraries (full site) to browser download ─────────────────────
+
+export async function exportInventoryToExcel(inventory: SiteFileInventory): Promise<void> {
+  for (const lib of inventory.libraries) {
+    await downloadLibraryExcel(inventory.siteName, lib)
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function styleHeader(row: ExcelJS.Row): void {
+  row.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0078D4' } }
 }
 
 function autoWidth(ws: ExcelJS.Worksheet): void {
