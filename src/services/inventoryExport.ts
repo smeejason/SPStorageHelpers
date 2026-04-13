@@ -94,9 +94,15 @@ export async function saveLibraryExcelToSP(
   const buffer = await wb.xlsx.writeBuffer()
   const fileName = libraryExcelFileName(siteName, lib.driveName)
 
+  // Must send as Blob with correct MIME type — the Graph SDK
+  // corrupts raw ArrayBuffers by serializing them as JSON
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+
   await client
     .api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}/${fileName}:/content`)
-    .put(buffer)
+    .put(blob)
 
   console.log(`[ExcelCache] Saved ${fileName}`)
 }
