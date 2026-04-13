@@ -105,6 +105,50 @@ export interface DriveStorageInfo {
   itemCount: number;
 }
 
+/** A single file in the inventory (current version) */
+export interface FileInventoryItem {
+  id: string;
+  driveId: string;
+  libraryName: string;
+  name: string;
+  title: string;
+  path: string;
+  webUrl: string;
+  size: number;
+  createdDateTime: string;
+  createdBy: string;
+  lastModifiedDateTime: string;
+  lastModifiedBy: string;
+  versionLabel: string;
+  versions: FileVersionDetail[];
+}
+
+/** A single version of a file */
+export interface FileVersionDetail {
+  versionId: string;
+  versionLabel: string;
+  size: number;
+  lastModifiedDateTime: string;
+  lastModifiedBy: string;
+}
+
+/** Full file inventory for a site, grouped by library */
+export interface SiteFileInventory {
+  siteId: string;
+  siteName: string;
+  libraries: LibraryInventory[];
+  lastScanned: string;
+}
+
+/** All files within a single document library */
+export interface LibraryInventory {
+  driveId: string;
+  driveName: string;
+  usedBytes: number;
+  totalBytes: number;
+  files: FileInventoryItem[];
+}
+
 /** Application route names */
 export type RouteName = 'dashboard' | 'sites' | 'cleanup' | 'export';
 

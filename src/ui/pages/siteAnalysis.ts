@@ -1,14 +1,12 @@
 import { store } from '../../store/store'
-import {
-  fetchSiteStorage,
-  fetchLargeFiles,
-  fetchRecycleBinItems,
-} from '../../services/storageService'
+import { fetchSiteStorage } from '../../services/storageService'
+import { fetchSiteFileInventory } from '../../services/inventoryService'
+import { exportInventoryToExcel } from '../../services/inventoryExport'
 import { loadSiteAnalysis, saveSiteAnalysis } from '../../services/fileStorageService'
 import { renderStorageBar } from '../components/storageBar'
+import { renderFileTreeTable } from '../components/fileTreeTable'
 import { formatBytes, formatDate } from '../../utils/format'
-import { getGraphClient } from '../../services/graphClient'
-import type { SiteAnalysisData, DriveStorageInfo } from '../../types'
+import type { SiteFileInventory, SiteAnalysisData } from '../../types'
 
 export function renderSiteAnalysis(container: HTMLElement): void {
   container.innerHTML = ''
@@ -48,32 +46,38 @@ export function renderSiteAnalysis(container: HTMLElement): void {
   })
   controls.appendChild(analyseBtn)
 
-  const cacheStatus = document.createElement('span')
-  cacheStatus.style.cssText = 'font-size:0.82rem;color:var(--color-text-muted);margin-left:8px;'
-  controls.appendChild(cacheStatus)
+  const exportBtn = document.createElement('button')
+  exportBtn.className = 'btn btn-secondary'
+  exportBtn.textContent = 'Export to Excel'
+  exportBtn.disabled = true
+  exportBtn.style.display = 'none'
+  controls.appendChild(exportBtn)
+
+  const statusSpan = document.createElement('span')
+  statusSpan.style.cssText = 'font-size:0.82rem;color:var(--color-text-muted);margin-left:8px;'
+  controls.appendChild(statusSpan)
 
   container.appendChild(controls)
 
   // ─── Content sections ───────────────────────────────────────────
 
-  const detailSection = document.createElement('section')
-  detailSection.className = 'card'
-  container.appendChild(detailSection)
+  const progressSection = document.createElement('div')
+  progressSection.style.cssText = 'padding:12px 0;color:var(--color-text-muted);font-size:0.85rem;'
+  container.appendChild(progressSection)
 
-  const drivesSection = document.createElement('section')
-  drivesSection.className = 'card hidden'
-  container.appendChild(drivesSection)
+  const overviewSection = document.createElement('section')
+  overviewSection.className = 'card hidden'
+  container.appendChild(overviewSection)
 
-  const largeFilesSection = document.createElement('section')
-  largeFilesSection.className = 'card hidden'
-  container.appendChild(largeFilesSection)
-
-  const recycleBinSection = document.createElement('section')
-  recycleBinSection.className = 'card hidden'
-  container.appendChild(recycleBinSection)
+  const treeContainer = document.createElement('section')
+  treeContainer.className = 'card hidden'
+  treeContainer.style.cssText = 'overflow-x:auto;padding:12px;'
+  container.appendChild(treeContainer)
 
   siteSelect.addEventListener('change', () => {
     analyseBtn.disabled = !siteSelect.value
+    exportBtn.style.display = 'none'
+    exportBtn.disabled = true
     if (siteSelect.value) tryLoadCached(siteSelect.value)
   })
 
@@ -103,22 +107,31 @@ export function renderSiteAnalysis(container: HTMLElement): void {
   // ─── Try loading cached analysis ────────────────────────────────
 
   async function tryLoadCached(siteId: string): Promise<void> {
-    cacheStatus.textContent = 'Checking cache...'
+    statusSpan.textContent = 'Checking cache...'
     const cached = await loadSiteAnalysis(siteId)
-    if (cached) {
-      cacheStatus.textContent = `Cached: ${formatDate(cached.lastAnalysed)}`
-      renderAnalysis(cached)
+    if (cached && 'libraries' in cached) {
+      // It's a full inventory (new format)
+      const inv = cached as unknown as SiteFileInventory
+      statusSpan.textContent = `Cached: ${formatDate(inv.lastScanned ?? (cached as SiteAnalysisData).lastAnalysed)}`
+
+      renderResults(inv)
+    } else if (cached) {
+      statusSpan.textContent = `Old cache format — click Analyse to rescan`
+      clearSections()
     } else {
-      cacheStatus.textContent = 'No cached data — click Analyse'
+      statusSpan.textContent = 'No cached data — click Analyse'
       clearSections()
     }
   }
 
   function clearSections(): void {
-    detailSection.innerHTML = ''
-    drivesSection.classList.add('hidden')
-    largeFilesSection.classList.add('hidden')
-    recycleBinSection.classList.add('hidden')
+    overviewSection.classList.add('hidden')
+    overviewSection.innerHTML = ''
+    treeContainer.classList.add('hidden')
+    treeContainer.innerHTML = ''
+    progressSection.textContent = ''
+    exportBtn.style.display = 'none'
+
   }
 
   // ─── Run full analysis ──────────────────────────────────────────
@@ -130,177 +143,108 @@ export function renderSiteAnalysis(container: HTMLElement): void {
 
     analyseBtn.disabled = true
     analyseBtn.textContent = 'Analysing...'
-    cacheStatus.textContent = ''
+    exportBtn.style.display = 'none'
+    statusSpan.textContent = ''
+    clearSections()
 
     try {
-      // Fetch drive breakdown
-      detailSection.innerHTML = '<p style="color:var(--color-text-muted)">Fetching drive details...</p>'
-      const driveBreakdown = await fetchDriveBreakdown(siteId)
+      const inventory = await fetchSiteFileInventory(
+        siteId,
+        site.displayName,
+        (msg) => { progressSection.textContent = msg },
+      )
 
-      // Fetch large files
-      detailSection.innerHTML = '<p style="color:var(--color-text-muted)">Scanning large files...</p>'
-      const largeFiles = await fetchLargeFiles(siteId)
 
-      // Fetch recycle bin
-      detailSection.innerHTML = '<p style="color:var(--color-text-muted)">Checking recycle bin...</p>'
-      let recycleBinItems: Awaited<ReturnType<typeof fetchRecycleBinItems>> = []
-      try {
-        recycleBinItems = await fetchRecycleBinItems(siteId)
-      } catch {
-        // Recycle bin access may be restricted
-      }
-
-      // Build analysis data
-      const analysisData: SiteAnalysisData = {
-        siteId: site.id,
-        siteName: site.displayName,
-        siteUrl: site.webUrl,
-        storageUsedInBytes: site.storageUsedInBytes,
-        storageAllocatedInBytes: site.storageAllocatedInBytes,
-        largeFiles,
-        recycleBinItems,
-        driveBreakdown,
-        lastAnalysed: new Date().toISOString(),
-      }
-
-      // Render
-      renderAnalysis(analysisData)
+      progressSection.textContent = ''
+      renderResults(inventory)
 
       // Save to Documents/SPStorage/
-      cacheStatus.textContent = 'Saving analysis...'
+      statusSpan.textContent = 'Saving...'
       try {
-        await saveSiteAnalysis(analysisData)
-        cacheStatus.textContent = `Saved: ${formatDate(analysisData.lastAnalysed)}`
+        // Save as the new inventory format (compatible with SiteAnalysisData via shared fields)
+        await saveSiteAnalysis(inventory as unknown as SiteAnalysisData)
+        statusSpan.textContent = `Saved: ${formatDate(inventory.lastScanned)}`
       } catch {
-        cacheStatus.textContent = 'Save failed'
+        statusSpan.textContent = 'Save failed'
       }
     } catch (err) {
-      detailSection.innerHTML = `<p class="error-message">Analysis failed: ${(err as Error).message}</p>`
+      progressSection.textContent = ''
+      overviewSection.classList.remove('hidden')
+      overviewSection.innerHTML = `<p class="error-message">Analysis failed: ${(err as Error).message}</p>`
     } finally {
       analyseBtn.disabled = false
       analyseBtn.textContent = 'Analyse Site'
     }
   }
 
-  // ─── Render analysis results ────────────────────────────────────
+  // ─── Render results ─────────────────────────────────────────────
 
-  function renderAnalysis(data: SiteAnalysisData): void {
-    // Site overview card
-    detailSection.innerHTML = ''
+  function renderResults(inventory: SiteFileInventory): void {
+    // Overview card
+    overviewSection.classList.remove('hidden')
+    overviewSection.innerHTML = ''
+
     const h2 = document.createElement('h2')
-    h2.textContent = data.siteName
-    detailSection.appendChild(h2)
-    renderStorageBar(detailSection, data.storageUsedInBytes, data.storageAllocatedInBytes)
+    h2.textContent = inventory.siteName
+    overviewSection.appendChild(h2)
 
-    const meta = document.createElement('div')
-    meta.className = 'meta-info'
-    meta.innerHTML = `
-      <p><strong>URL:</strong> <a href="${escHtml(data.siteUrl)}" target="_blank" rel="noopener">${escHtml(data.siteUrl)}</a></p>
-      <p><strong>Last Analysed:</strong> ${formatDate(data.lastAnalysed)}</p>
+    // Total storage bar from all libraries
+    const totalUsed = inventory.libraries.reduce((s, l) => s + l.usedBytes, 0)
+    const totalQuota = inventory.libraries.reduce((s, l) => s + l.totalBytes, 0)
+    if (totalQuota > 0) {
+      renderStorageBar(overviewSection, totalUsed, totalQuota)
+    }
+
+    const totalFiles = inventory.libraries.reduce((s, l) => s + l.files.length, 0)
+    const totalVersions = inventory.libraries.reduce(
+      (s, l) => s + l.files.reduce((fs, f) => fs + f.versions.length, 0), 0,
+    )
+    const totalVersionSize = inventory.libraries.reduce(
+      (s, l) => s + l.files.reduce((fs, f) => fs + f.versions.reduce((vs, v) => vs + v.size, 0), 0), 0,
+    )
+
+    const stats = document.createElement('div')
+    stats.className = 'stats-grid'
+    stats.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-value">${inventory.libraries.length}</div>
+        <div class="stat-label">Libraries</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${totalFiles.toLocaleString()}</div>
+        <div class="stat-label">Files</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${totalVersions.toLocaleString()}</div>
+        <div class="stat-label">Total Versions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${formatBytes(totalVersionSize)}</div>
+        <div class="stat-label">Version Storage</div>
+      </div>
     `
-    detailSection.appendChild(meta)
+    overviewSection.appendChild(stats)
 
-    // Drive breakdown
-    if (data.driveBreakdown.length > 0) {
-      drivesSection.classList.remove('hidden')
-      drivesSection.innerHTML = '<h2>Storage by Library</h2>'
-      const table = document.createElement('table')
-      table.className = 'data-table'
-      table.innerHTML = `<thead><tr><th>Library</th><th>Used</th><th>Total</th><th>Items</th></tr></thead>`
-      const tbody = document.createElement('tbody')
-      data.driveBreakdown
-        .sort((a, b) => b.usedBytes - a.usedBytes)
-        .forEach((d) => {
-          const tr = document.createElement('tr')
-          tr.innerHTML = `
-            <td>${escHtml(d.driveName)}</td>
-            <td>${formatBytes(d.usedBytes)}</td>
-            <td>${formatBytes(d.totalBytes)}</td>
-            <td>${d.itemCount}</td>
-          `
-          tbody.appendChild(tr)
-        })
-      table.appendChild(tbody)
-      drivesSection.appendChild(table)
-    } else {
-      drivesSection.classList.add('hidden')
+    // Tree table
+    treeContainer.classList.remove('hidden')
+    treeContainer.innerHTML = '<h2>File Inventory</h2>'
+    renderFileTreeTable(treeContainer, inventory)
+
+    // Enable Excel export
+    exportBtn.style.display = ''
+    exportBtn.disabled = false
+    exportBtn.onclick = async () => {
+      exportBtn.disabled = true
+      exportBtn.textContent = 'Exporting...'
+      try {
+        await exportInventoryToExcel(inventory)
+        exportBtn.textContent = 'Export to Excel'
+      } catch {
+        exportBtn.textContent = 'Export failed'
+        setTimeout(() => { exportBtn.textContent = 'Export to Excel' }, 2000)
+      }
+      exportBtn.disabled = false
     }
-
-    // Large files
-    largeFilesSection.classList.remove('hidden')
-    largeFilesSection.innerHTML = '<h2>Large Files (&gt; 10 MB)</h2>'
-    if (data.largeFiles.length === 0) {
-      largeFilesSection.innerHTML += '<p>No large files found.</p>'
-    } else {
-      const totalLargeSize = data.largeFiles.reduce((s, f) => s + f.size, 0)
-      largeFilesSection.innerHTML += `<p><strong>${data.largeFiles.length} files</strong> totalling <strong>${formatBytes(totalLargeSize)}</strong></p>`
-      const table = document.createElement('table')
-      table.className = 'data-table'
-      table.innerHTML = `<thead><tr><th>File</th><th>Size</th><th>Library</th><th>Modified</th><th>Modified By</th></tr></thead>`
-      const tbody = document.createElement('tbody')
-      data.largeFiles.forEach((f) => {
-        const tr = document.createElement('tr')
-        tr.innerHTML = `
-          <td><a href="${escHtml(f.webUrl)}" target="_blank" rel="noopener">${escHtml(f.name)}</a></td>
-          <td>${formatBytes(f.size)}</td>
-          <td>${escHtml(f.libraryName)}</td>
-          <td>${formatDate(f.lastModifiedDateTime)}</td>
-          <td>${escHtml(f.lastModifiedBy)}</td>
-        `
-        tbody.appendChild(tr)
-      })
-      table.appendChild(tbody)
-      largeFilesSection.appendChild(table)
-    }
-
-    // Recycle bin
-    recycleBinSection.classList.remove('hidden')
-    recycleBinSection.innerHTML = '<h2>Recycle Bin</h2>'
-    if (data.recycleBinItems.length === 0) {
-      recycleBinSection.innerHTML += '<p>Recycle bin is empty.</p>'
-    } else {
-      const totalRecycleSize = data.recycleBinItems.reduce((s, item) => s + item.size, 0)
-      recycleBinSection.innerHTML += `<p><strong>${data.recycleBinItems.length} items</strong> totalling <strong>${formatBytes(totalRecycleSize)}</strong></p>`
-      const table = document.createElement('table')
-      table.className = 'data-table'
-      table.innerHTML = `<thead><tr><th>Name</th><th>Size</th><th>Deleted</th><th>Type</th></tr></thead>`
-      const tbody = document.createElement('tbody')
-      data.recycleBinItems.slice(0, 50).forEach((item) => {
-        const tr = document.createElement('tr')
-        tr.innerHTML = `
-          <td>${escHtml(item.title)}</td>
-          <td>${formatBytes(item.size)}</td>
-          <td>${formatDate(item.deletedDateTime)}</td>
-          <td>${escHtml(item.itemType)}</td>
-        `
-        tbody.appendChild(tr)
-      })
-      table.appendChild(tbody)
-      recycleBinSection.appendChild(table)
-    }
-  }
-
-  // ─── Fetch drive breakdown ──────────────────────────────────────
-
-  async function fetchDriveBreakdown(siteId: string): Promise<DriveStorageInfo[]> {
-    const client = getGraphClient()
-    const drivesResp = await client
-      .api(`/sites/${siteId}/drives`)
-      .select('id,name,quota')
-      .get()
-
-    const breakdown: DriveStorageInfo[] = []
-    for (const drive of drivesResp.value ?? []) {
-      const q = drive.quota ?? {}
-      breakdown.push({
-        driveId: drive.id,
-        driveName: drive.name ?? 'Unnamed',
-        usedBytes: q.used ?? 0,
-        totalBytes: q.total ?? 0,
-        itemCount: q.fileCount ?? 0,
-      })
-    }
-    return breakdown
   }
 
   // ─── Initial load ─────────────────────────────────────────────────
@@ -312,7 +256,7 @@ export function renderSiteAnalysis(container: HTMLElement): void {
     loadSiteList()
   }
 
-  // If a site was pre-selected from the dashboard, select it and load cached data
+  // If a site was pre-selected from the dashboard
   const selectedSiteId = store.getState().selectedSiteId
   if (selectedSiteId) {
     siteSelect.value = selectedSiteId
@@ -320,8 +264,4 @@ export function renderSiteAnalysis(container: HTMLElement): void {
     store.dispatch({ type: 'SET_SELECTED_SITE', payload: null })
     tryLoadCached(selectedSiteId)
   }
-}
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
