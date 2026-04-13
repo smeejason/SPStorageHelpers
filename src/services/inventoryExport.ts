@@ -112,13 +112,29 @@ export async function loadLibraryExcelFromSP(
   const fileName = libraryExcelFileName(siteName, libName)
 
   try {
-    const resp = await client
-      .api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}/${fileName}:/content`)
-      .responseType('arraybuffer' as never)
+    console.log(`[ExcelCache] Loading ${fileName}...`)
+
+    // Get a download URL for the file, then fetch the binary content directly
+    const meta = await client
+      .api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}/${fileName}`)
+      .select('@microsoft.graph.downloadUrl')
       .get()
 
+    const downloadUrl = meta['@microsoft.graph.downloadUrl'] as string
+    if (!downloadUrl) {
+      console.warn('[ExcelCache] No download URL returned')
+      return null
+    }
+
+    const response = await fetch(downloadUrl)
+    if (!response.ok) {
+      console.warn(`[ExcelCache] Download failed: ${response.status}`)
+      return null
+    }
+
+    const arrayBuffer = await response.arrayBuffer()
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(resp as ArrayBuffer)
+    await wb.xlsx.load(arrayBuffer)
 
     const filesSheet = wb.getWorksheet('Files')
     if (!filesSheet) return null
