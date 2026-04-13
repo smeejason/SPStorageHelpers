@@ -1,6 +1,6 @@
 import { store } from '../../store/store'
 import { fetchSiteStorage } from '../../services/storageService'
-import { fetchSiteFileInventory } from '../../services/inventoryService'
+import { fetchSiteFileInventory, type InventoryProgress } from '../../services/inventoryService'
 import { exportInventoryToExcel } from '../../services/inventoryExport'
 import { loadSiteAnalysis, saveSiteAnalysis } from '../../services/fileStorageService'
 import { renderStorageBar } from '../components/storageBar'
@@ -59,11 +59,39 @@ export function renderSiteAnalysis(container: HTMLElement): void {
 
   container.appendChild(controls)
 
-  // ─── Content sections ───────────────────────────────────────────
+  // ─── Progress UI ────────────────────────────────────────────────
+
+  injectProgressStyles()
 
   const progressSection = document.createElement('div')
-  progressSection.style.cssText = 'padding:12px 0;color:var(--color-text-muted);font-size:0.85rem;'
+  progressSection.className = 'analysis-progress hidden'
+  progressSection.innerHTML = `
+    <div class="progress-spinner"></div>
+    <div class="progress-details">
+      <div class="progress-phase"></div>
+      <div class="progress-bar-track"><div class="progress-bar-fill"></div></div>
+      <div class="progress-counts"></div>
+    </div>
+  `
   container.appendChild(progressSection)
+
+  const progressPhase = progressSection.querySelector('.progress-phase') as HTMLElement
+  const progressFill = progressSection.querySelector('.progress-bar-fill') as HTMLElement
+  const progressCounts = progressSection.querySelector('.progress-counts') as HTMLElement
+
+  function updateProgress(p: InventoryProgress): void {
+    if (p.phase === 'done') {
+      progressSection.classList.add('hidden')
+      return
+    }
+    progressSection.classList.remove('hidden')
+    progressPhase.textContent = p.message
+    const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0
+    progressFill.style.width = `${pct}%`
+    progressCounts.textContent = p.total > 0 ? `${p.current} / ${p.total}` : ''
+  }
+
+  // ─── Content sections ───────────────────────────────────────────
 
   const overviewSection = document.createElement('section')
   overviewSection.className = 'card hidden'
@@ -129,9 +157,8 @@ export function renderSiteAnalysis(container: HTMLElement): void {
     overviewSection.innerHTML = ''
     treeContainer.classList.add('hidden')
     treeContainer.innerHTML = ''
-    progressSection.textContent = ''
+    progressSection.classList.add('hidden')
     exportBtn.style.display = 'none'
-
   }
 
   // ─── Run full analysis ──────────────────────────────────────────
@@ -151,11 +178,10 @@ export function renderSiteAnalysis(container: HTMLElement): void {
       const inventory = await fetchSiteFileInventory(
         siteId,
         site.displayName,
-        (msg) => { progressSection.textContent = msg },
+        updateProgress,
       )
 
-
-      progressSection.textContent = ''
+      progressSection.classList.add('hidden')
       renderResults(inventory)
 
       // Save to Documents/SPStorage/
@@ -168,7 +194,7 @@ export function renderSiteAnalysis(container: HTMLElement): void {
         statusSpan.textContent = 'Save failed'
       }
     } catch (err) {
-      progressSection.textContent = ''
+      progressSection.classList.add('hidden')
       overviewSection.classList.remove('hidden')
       overviewSection.innerHTML = `<p class="error-message">Analysis failed: ${(err as Error).message}</p>`
     } finally {
@@ -264,4 +290,45 @@ export function renderSiteAnalysis(container: HTMLElement): void {
     store.dispatch({ type: 'SET_SELECTED_SITE', payload: null })
     tryLoadCached(selectedSiteId)
   }
+}
+
+// ─── Progress bar styles ──────────────────────────────────────────────────────
+
+function injectProgressStyles(): void {
+  if (document.getElementById('analysis-progress-styles')) return
+  const style = document.createElement('style')
+  style.id = 'analysis-progress-styles'
+  style.textContent = `
+    .analysis-progress {
+      display: flex; align-items: center; gap: 16px;
+      padding: 20px 24px; background: white; border: 1px solid var(--color-border);
+      border-radius: 4px; margin-bottom: 16px;
+    }
+    .analysis-progress.hidden { display: none; }
+    .progress-spinner {
+      width: 32px; height: 32px; flex-shrink: 0;
+      border: 3px solid var(--color-border);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: progress-spin 0.8s linear infinite;
+    }
+    @keyframes progress-spin { to { transform: rotate(360deg); } }
+    .progress-details { flex: 1; min-width: 0; }
+    .progress-phase {
+      font-size: 0.875rem; color: var(--color-text); font-weight: 500;
+      margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .progress-bar-track {
+      height: 8px; background: var(--color-border); border-radius: 4px;
+      overflow: hidden; margin-bottom: 4px;
+    }
+    .progress-bar-fill {
+      height: 100%; background: var(--color-primary); border-radius: 4px;
+      transition: width 0.2s ease; width: 0%;
+    }
+    .progress-counts {
+      font-size: 0.75rem; color: var(--color-text-muted); text-align: right;
+    }
+  `
+  document.head.appendChild(style)
 }

@@ -6,27 +6,44 @@ import type {
   SiteFileInventory,
 } from '../types'
 
+/** Progress info passed back to the UI */
+export interface InventoryProgress {
+  phase: 'libraries' | 'files' | 'versions' | 'done'
+  message: string
+  /** Current item index (0-based) */
+  current: number
+  /** Total items in this phase */
+  total: number
+}
+
 // ─── Fetch full file inventory for a site ─────────────────────────────────────
 
 export async function fetchSiteFileInventory(
   siteId: string,
   siteName: string,
-  onProgress?: (msg: string) => void,
+  onProgress?: (p: InventoryProgress) => void,
 ): Promise<SiteFileInventory> {
   const client = getGraphClient()
 
   // Get all drives
-  onProgress?.('Fetching document libraries...')
+  onProgress?.({ phase: 'libraries', message: 'Fetching document libraries...', current: 0, total: 0 })
   const drivesResp = await client
     .api(`/sites/${siteId}/drives`)
     .select('id,name,quota')
     .get()
 
+  const driveList = drivesResp.value ?? []
   const libraries: LibraryInventory[] = []
 
-  for (const drive of drivesResp.value ?? []) {
+  for (let di = 0; di < driveList.length; di++) {
+    const drive = driveList[di]
     const driveName = drive.name ?? 'Unnamed'
-    onProgress?.(`Scanning library: ${driveName}...`)
+    onProgress?.({
+      phase: 'files',
+      message: `Scanning library ${di + 1}/${driveList.length}: ${driveName}...`,
+      current: di,
+      total: driveList.length,
+    })
 
     const q = drive.quota ?? {}
     const files: FileInventoryItem[] = []
@@ -34,15 +51,15 @@ export async function fetchSiteFileInventory(
     // Use delta to enumerate all items in the drive
     try {
       let deltaLink: string | null = `/drives/${drive.id}/root/delta`
+      let pageCount = 0
       while (deltaLink) {
         const resp = await client.api(deltaLink).top(200).get()
+        pageCount++
 
         for (const item of resp.value ?? []) {
-          // Only process files (skip folders)
           if (!item.file) continue
 
           const parentPath = item.parentReference?.path ?? ''
-          // Strip the drive root prefix to get the relative path
           const rootPrefix = `/drives/${drive.id}/root:`
           const relativePath = parentPath.startsWith(rootPrefix)
             ? parentPath.slice(rootPrefix.length)
@@ -66,6 +83,13 @@ export async function fetchSiteFileInventory(
           })
         }
 
+        onProgress?.({
+          phase: 'files',
+          message: `Scanning ${driveName}: ${files.length} files found (page ${pageCount})...`,
+          current: di,
+          total: driveList.length,
+        })
+
         deltaLink = resp['@odata.nextLink']
           ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
           : null
@@ -75,8 +99,15 @@ export async function fetchSiteFileInventory(
     }
 
     // Fetch versions for each file
-    onProgress?.(`Fetching versions for ${files.length} files in ${driveName}...`)
-    for (const file of files) {
+    for (let fi = 0; fi < files.length; fi++) {
+      const file = files[fi]
+      onProgress?.({
+        phase: 'versions',
+        message: `${driveName}: fetching versions ${fi + 1} / ${files.length}`,
+        current: fi,
+        total: files.length,
+      })
+
       try {
         const versionsResp = await client
           .api(`/drives/${drive.id}/items/${file.id}/versions`)
@@ -95,7 +126,6 @@ export async function fetchSiteFileInventory(
           })
         }
         file.versions = versions
-        // Set the current version label from the first version (most recent)
         if (versions.length > 0) {
           file.versionLabel = versions[0].versionLabel
         }
@@ -112,6 +142,8 @@ export async function fetchSiteFileInventory(
       files,
     })
   }
+
+  onProgress?.({ phase: 'done', message: 'Analysis complete', current: 0, total: 0 })
 
   return {
     siteId,
