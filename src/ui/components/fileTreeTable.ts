@@ -12,6 +12,13 @@ const CHEVRON_DOWN = `<svg width="12" height="12" viewBox="0 0 12 12" fill="curr
 
 const VERSION_ICON = `<svg width="12" height="12" viewBox="0 0 12 12" fill="var(--color-text-muted)"><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1" fill="none"/></svg>`
 
+// ─── Safe ID for data attributes ──────────────────────────────────────────────
+
+let nodeCounter = 0
+function nextNodeId(): string {
+  return `n${++nodeCounter}`
+}
+
 // ─── Inject styles ────────────────────────────────────────────────────────────
 
 function injectTreeStyles(): void {
@@ -32,8 +39,9 @@ function injectTreeStyles(): void {
     .tree-toggle svg { flex-shrink: 0; transition: transform 0.15s; }
 
     .tree-file td:first-child { padding-left: 32px; }
+    .tree-file td { font-weight: normal; background: transparent; }
     .tree-version td:first-child { padding-left: 56px; }
-    .tree-version td { color: var(--color-text-muted); font-size: 0.78rem; }
+    .tree-version td { color: var(--color-text-muted); font-size: 0.78rem; font-weight: normal; background: transparent; }
     .tree-version-label { display: inline-flex; align-items: center; gap: 4px; }
 
     .tree-summary { display: flex; gap: 16px; font-size: 0.8rem; color: var(--color-text-muted); margin-left: auto; }
@@ -50,7 +58,6 @@ function injectTreeStyles(): void {
 
 export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileInventory): void {
   injectTreeStyles()
-  container.innerHTML = ''
 
   const table = document.createElement('table')
   table.className = 'tree-table'
@@ -71,7 +78,7 @@ export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileI
   const tbody = document.createElement('tbody')
 
   for (const lib of inventory.libraries) {
-    const libId = `lib-${lib.driveId}`
+    const libNodeId = nextNodeId()
     const totalFiles = lib.files.length
     const totalVersions = lib.files.reduce((s, f) => s + f.versions.length, 0)
     const totalSize = lib.files.reduce((s, f) => s + f.size, 0)
@@ -79,7 +86,7 @@ export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileI
     // Library node row
     const libRow = document.createElement('tr')
     libRow.className = 'tree-node'
-    libRow.dataset.libId = libId
+    libRow.dataset.nodeId = libNodeId
     libRow.innerHTML = `
       <td colspan="5">
         <span class="tree-toggle">
@@ -101,12 +108,13 @@ export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileI
 
     // File rows (initially hidden)
     for (const file of lib.files) {
-      const fileId = `file-${file.id}`
+      const fileNodeId = nextNodeId()
       const hasVersions = file.versions.length > 1
 
       const fileRow = document.createElement('tr')
-      fileRow.className = `tree-file tree-hidden tree-child-${libId}`
-      fileRow.dataset.fileId = fileId
+      fileRow.className = 'tree-file tree-hidden'
+      fileRow.dataset.parentId = libNodeId
+      fileRow.dataset.nodeId = fileNodeId
       if (hasVersions) {
         fileRow.classList.add('tree-node')
       }
@@ -132,7 +140,8 @@ export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileI
       if (hasVersions) {
         for (const ver of file.versions) {
           const verRow = document.createElement('tr')
-          verRow.className = `tree-version tree-hidden tree-child-${fileId}`
+          verRow.className = 'tree-version tree-hidden'
+          verRow.dataset.parentId = fileNodeId
           verRow.innerHTML = `
             <td><span class="tree-version-label">${VERSION_ICON} v${escHtml(ver.versionLabel)}</span></td>
             <td></td>
@@ -158,8 +167,8 @@ export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileI
     const row = (e.target as HTMLElement).closest('tr.tree-node') as HTMLElement | null
     if (!row) return
 
-    const id = row.dataset.libId ?? row.dataset.fileId
-    if (!id) return
+    const nodeId = row.dataset.nodeId
+    if (!nodeId) return
 
     const isExpanded = row.classList.contains('tree-expanded')
     row.classList.toggle('tree-expanded')
@@ -170,19 +179,19 @@ export function renderFileTreeTable(container: HTMLElement, inventory: SiteFileI
       chevron.innerHTML = isExpanded ? CHEVRON_RIGHT : CHEVRON_DOWN
     }
 
-    // Toggle children
-    const children = tbody.querySelectorAll(`.tree-child-${id}`)
+    // Toggle direct children (using data-parent-id attribute selector)
+    const children = tbody.querySelectorAll<HTMLElement>(`tr[data-parent-id="${nodeId}"]`)
     children.forEach((child) => {
       if (isExpanded) {
         child.classList.add('tree-hidden')
-        // Also collapse any expanded children
+        // Also collapse any expanded children recursively
         if (child.classList.contains('tree-expanded')) {
           child.classList.remove('tree-expanded')
           const subChevron = child.querySelector('.tree-chevron')
           if (subChevron) subChevron.innerHTML = CHEVRON_RIGHT
-          const subId = (child as HTMLElement).dataset.fileId
+          const subId = child.dataset.nodeId
           if (subId) {
-            tbody.querySelectorAll(`.tree-child-${subId}`).forEach((sc) => sc.classList.add('tree-hidden'))
+            tbody.querySelectorAll<HTMLElement>(`tr[data-parent-id="${subId}"]`).forEach((sc) => sc.classList.add('tree-hidden'))
           }
         }
       } else {
