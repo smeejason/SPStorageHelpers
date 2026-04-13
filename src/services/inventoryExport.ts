@@ -119,22 +119,27 @@ export async function loadLibraryExcelFromSP(
       .api(`/sites/${SP_SITE_ID}/drive/root:/${FOLDER_PATH}/${fileName}`)
       .select('@microsoft.graph.downloadUrl')
       .get()
+    console.log('[ExcelCache] Got metadata, downloadUrl present:', !!meta['@microsoft.graph.downloadUrl'])
 
     const downloadUrl = meta['@microsoft.graph.downloadUrl'] as string
     if (!downloadUrl) {
-      console.warn('[ExcelCache] No download URL returned')
+      console.warn('[ExcelCache] No download URL returned. Meta keys:', Object.keys(meta))
       return null
     }
 
+    console.log('[ExcelCache] Fetching binary...')
     const response = await fetch(downloadUrl)
     if (!response.ok) {
-      console.warn(`[ExcelCache] Download failed: ${response.status}`)
+      console.warn(`[ExcelCache] Download failed: ${response.status} ${response.statusText}`)
       return null
     }
 
     const arrayBuffer = await response.arrayBuffer()
+    console.log(`[ExcelCache] Got ${arrayBuffer.byteLength} bytes, parsing Excel...`)
+
     const wb = new ExcelJS.Workbook()
     await wb.xlsx.load(arrayBuffer)
+    console.log('[ExcelCache] Parsed workbook, sheets:', wb.worksheets.map(s => s.name))
 
     const filesSheet = wb.getWorksheet('Files')
     if (!filesSheet) return null
@@ -186,7 +191,8 @@ export async function loadLibraryExcelFromSP(
 
     console.log(`[ExcelCache] Loaded ${fileName}: ${files.length} files`)
     return { driveId: '', driveName: libName, usedBytes: 0, totalBytes: 0, files }
-  } catch {
+  } catch (err) {
+    console.error(`[ExcelCache] Failed to load ${fileName}:`, err)
     return null
   }
 }
